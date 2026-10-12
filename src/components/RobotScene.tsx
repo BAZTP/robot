@@ -3,9 +3,10 @@ import type { ComponentRef, ReactNode } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { ContactShadows, Environment, Lightformer, OrbitControls, RoundedBox } from '@react-three/drei';
 import * as THREE from 'three';
-import type { RobotSettings } from '../lib/state';
-import { robotPose } from '../lib/motion';
-import type { RobotAction } from '../lib/motion';
+import type { GardenPlot, RobotSettings, ZoneId } from '../lib/state';
+import { eyeOpenness, robotPose } from '../lib/motion';
+import type { RobotAction, RobotMood } from '../lib/motion';
+import ProceduralHabitat from './ProceduralHabitat';
 
 interface SceneProps {
   settings: RobotSettings;
@@ -14,6 +15,12 @@ interface SceneProps {
   cameraReset: number;
   onReady: (canvas: HTMLCanvasElement) => void;
   onWave: () => void;
+  zone: ZoneId;
+  garden: GardenPlot[];
+  gardenView: boolean;
+  mood: RobotMood;
+  selectedPlot: number;
+  onSelectPlot: (index: number) => void;
 }
 
 function Label({ text, width = 0.38, height = 0.24, color = '#252626', bg = '#e6e4db', size = 100,
@@ -109,16 +116,20 @@ function Tracks({ side, action, reducedMotion }: { side: number; action: RobotAc
   </group>;
 }
 
-function Eye({ side, settings }: { side: number; settings: RobotSettings }) {
+function Eye({ side, settings, mood }: { side: number; settings: RobotSettings; mood: RobotMood }) {
+  const optics = useRef<THREE.Group>(null);
+  useFrame(({ clock }) => { if (optics.current) optics.current.scale.y = eyeOpenness(clock.elapsedTime, mood, settings.reducedMotion); });
   return <group position={[side * 0.60, 0, 0]} rotation={[0, side * -0.045, side * 0.09]}>
     <RoundedBox args={[1.13, 1.02, 0.76]} radius={0.20} smoothness={5} castShadow><meshStandardMaterial color={settings.shell} metalness={0.22} roughness={0.35} /></RoundedBox>
     <RoundedBox args={[0.095, 1.025, 0.767]} radius={0.025} smoothness={3} position={[side * 0.42, 0, 0]} castShadow><meshStandardMaterial color={settings.livery} metalness={0.15} roughness={0.34} /></RoundedBox>
     <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0, 0.39]}><cylinderGeometry args={[0.445, 0.445, 0.10, 48]} /><meshStandardMaterial color="#383b39" metalness={0.8} roughness={0.3} /></mesh>
     <mesh position={[0, 0, 0.455]}><torusGeometry args={[0.387, 0.027, 12, 48]} /><meshStandardMaterial color="#a6aaa0" metalness={0.95} roughness={0.22} /></mesh>
+    <group ref={optics}>
     <mesh position={[0, 0, 0.479]}><torusGeometry args={[0.346, 0.022, 12, 64]} /><meshStandardMaterial color={settings.light} emissive={settings.light} emissiveIntensity={0.75} toneMapped={false} /></mesh>
     <mesh position={[0, 0, 0.465]} scale={[1, 1, 0.49]} castShadow><sphereGeometry args={[0.321, 40, 32]} /><meshPhysicalMaterial color="#131e20" metalness={0.68} roughness={0.13} clearcoat={1} clearcoatRoughness={0.12} /></mesh>
     <mesh position={[-0.10, 0.16, 0.601]} rotation={[0, 0, -0.45]} scale={[0.09, 0.018, 0.006]}><sphereGeometry args={[1, 16, 8]} /><meshBasicMaterial color="#ffffff" transparent opacity={0.76} /></mesh>
     <mesh position={[0.11, -0.15, 0.599]} scale={[0.045, 0.009, 0.003]}><sphereGeometry args={[1, 12, 8]} /><meshBasicMaterial color="#ffffff" transparent opacity={0.25} /></mesh>
+    </group>
     {[-1, 1].flatMap(x => [-1, 1].map(y => <Bolt key={`${x}${y}`} position={[x * 0.46, y * 0.41, 0.382]} radius={0.025} />))}
   </group>;
 }
@@ -144,7 +155,7 @@ function Arm({ side, settings, plant, armRef }: { side: number; settings: RobotS
   </group>;
 }
 
-function Robot({ settings, action, plant, onWave, onRendered }: Pick<SceneProps, 'settings' | 'action' | 'plant' | 'onWave'> & { onRendered: () => void }) {
+function Robot({ settings, action, plant, onWave, onRendered, mood, gardenView }: Pick<SceneProps, 'settings' | 'action' | 'plant' | 'onWave' | 'mood' | 'gardenView'> & { onRendered: () => void }) {
   const root = useRef<THREE.Group>(null);
   const body = useRef<THREE.Group>(null);
   const head = useRef<THREE.Group>(null);
@@ -155,7 +166,7 @@ function Robot({ settings, action, plant, onWave, onRendered }: Pick<SceneProps,
     frames.current += 1;
     if (frames.current === 3) onRendered();
     const pose = robotPose(clock.elapsedTime, action, settings.reducedMotion);
-    if (root.current) { root.current.rotation.y = pose.yaw; root.current.position.x = pose.x; root.current.position.z = pose.z; }
+    if (root.current) { root.current.rotation.y = pose.yaw; root.current.position.x = pose.x - (gardenView ? 0.45 : 0); root.current.position.z = pose.z; }
     if (body.current) { body.current.position.y = pose.bodyY; body.current.rotation.z = pose.bodyTilt; }
     if (head.current) { head.current.rotation.z = pose.headTilt; head.current.rotation.y = pose.headTurn; }
     if (left.current) left.current.rotation.z = pose.leftArm;
@@ -172,9 +183,9 @@ function Robot({ settings, action, plant, onWave, onRendered }: Pick<SceneProps,
       <mesh position={[0.60, 1.11, 0.561]} rotation={[0, 0, -0.65]}><boxGeometry args={[0.16, 0.61, 0.02]} /><meshStandardMaterial color={settings.livery} /></mesh>
       <Label text="09" position={[-0.06, 1.80, 0.555]} width={0.61} height={0.36} bg={settings.shell} size={220} />
       <Label text="WEE / UNIT" position={[-0.06, 1.54, 0.556]} width={0.47} height={0.11} bg={settings.shell} color={settings.livery} size={62} />
-      <Label text="EXPLORER SERIES" position={[-0.1, 2.06, 0.557]} width={0.53} height={0.075} bg={settings.shell} size={40} />
+      <Label text="RE:GREEN / FIELD UNIT" position={[-0.1, 2.06, 0.557]} width={0.53} height={0.075} bg={settings.shell} size={40} />
       <RoundedBox args={[0.67, 0.35, 0.06]} position={[0.06, 1.13, 0.56]} radius={0.05} smoothness={3}><meshStandardMaterial color="#242e2d" metalness={0.5} /></RoundedBox>
-      <Label text={action === 'charge' ? '+ + +' : '•  —  •'} position={[0.06, 1.14, 0.599]} width={0.50} height={0.18} color={settings.light} bg="#242e2d" size={80} />
+      <Label text={action === 'charge' ? '+ + +' : mood === 'sleeping' ? 'z  z  z' : mood === 'happy' ? '^  _  ^' : mood === 'tired' ? '—  _  —' : '•  —  •'} position={[0.06, 1.14, 0.599]} width={0.50} height={0.18} color={settings.light} bg="#242e2d" size={80} />
       <mesh position={[-0.63, 1.58, 0.56]}><boxGeometry args={[0.09, 0.58, 0.025]} /><meshStandardMaterial color="#363d37" /></mesh>
       {[0, 1, 2, 3, 4].map(i => <mesh key={i} position={[-0.63, 1.36 + i * 0.11, 0.58]}><boxGeometry args={[0.06, 0.055, 0.015]} /><meshStandardMaterial color={settings.light} emissive={settings.light} emissiveIntensity={0.4} /></mesh>)}
       {[-1, 1].flatMap(x => [-1, 1].map(y => <Bolt key={`${x}${y}`} position={[x * 0.68, 1.57 + y * 0.56, 0.558]} />))}
@@ -184,7 +195,7 @@ function Robot({ settings, action, plant, onWave, onRendered }: Pick<SceneProps,
       <group ref={head} position={[0, 3.23, 0]} onClick={e => { e.stopPropagation(); onWave(); }}
         onPointerOver={() => { document.body.style.cursor = 'pointer'; }} onPointerOut={() => { document.body.style.cursor = ''; }}>
         <RoundedBox args={[0.22, 0.86, 0.50]} radius={0.04} smoothness={2}><meshStandardMaterial color="#242b2b" metalness={0.8} roughness={0.4} /></RoundedBox>
-        <Eye side={-1} settings={settings} /><Eye side={1} settings={settings} />
+        <Eye side={-1} settings={settings} mood={mood} /><Eye side={1} settings={settings} mood={mood} />
         {[0, 1, 2, 3].map(i => <mesh key={i} position={[0, 0.02 + i * 0.07, 0.29]}><boxGeometry args={[0.11, 0.03, 0.03]} /><meshStandardMaterial color={settings.light} emissive={settings.light} emissiveIntensity={0.6} /></mesh>)}
       </group>
       <Arm side={-1} settings={settings} armRef={left} /><Arm side={1} settings={settings} plant={plant} armRef={right} />
@@ -202,12 +213,12 @@ function CameraControls({ enabled, reset }: { enabled: boolean; reset: number })
   const controls = useRef<ComponentRef<typeof OrbitControls>>(null);
   const { camera } = useThree();
   useEffect(() => {
-    camera.position.set(4.8, 2.8, 7.3);
-    camera.lookAt(0, 0.3, 0);
-    controls.current?.target.set(0, 0.3, 0);
+    camera.position.set(5, 3, 7.7);
+    camera.lookAt(0, 0, 0);
+    controls.current?.target.set(0, 0, 0);
     controls.current?.update();
   }, [camera, reset]);
-  return <OrbitControls ref={controls} makeDefault target={[0, 0.3, 0]} enabled={enabled}
+  return <OrbitControls ref={controls} makeDefault target={[0, 0, 0]} enabled={enabled}
     enablePan={false} minDistance={6.5} maxDistance={13} minPolarAngle={Math.PI / 3} maxPolarAngle={Math.PI / 2 + 0.04} />;
 }
 
@@ -239,7 +250,7 @@ export default memo(function RobotScene(props: SceneProps) {
   const shadow = useMemo(() => <ContactShadows position={[0, -1.8, 0]} opacity={0.52} scale={12} blur={2.5} far={5} resolution={256} color="#424537" frames={1} />, []);
   return <SceneBoundary>
     {!loaded && <div className="scene-loader"><span className="loader-ring" /><span>DESPERTANDO A WEE</span></div>}
-    <Canvas shadows frameloop="demand" dpr={software ? 0.75 : [1, 1.7]} camera={{ position: [4.8, 2.8, 7.3], fov: 35 }}
+    <Canvas shadows frameloop="demand" dpr={software ? 0.75 : [1, 1.7]} camera={{ position: [5, 3, 7.7], fov: 38 }}
       gl={{ antialias: true, alpha: true, preserveDrawingBuffer: true }}
       onCreated={({ gl }) => {
         const context = gl.getContext();
@@ -249,12 +260,13 @@ export default memo(function RobotScene(props: SceneProps) {
         props.onReady(gl.domElement);
       }}
       fallback={<div className="scene-error">Tu navegador necesita WebGL para mostrar a WEE.</div>}>
-      <ambientLight intensity={0.9} />
-      <directionalLight position={[-4, 7, 5]} intensity={2.4} />
-      <directionalLight position={[5, 3, -4]} intensity={1.7} color="#e4e9ed" />
+      <ambientLight intensity={props.settings.night ? 0.45 : 0.9} />
+      <directionalLight position={[-4, 7, 5]} intensity={props.settings.night ? 1.0 : 2.4} color={props.settings.night ? '#b3c8ee' : '#ffffff'} />
+      <directionalLight position={[5, 3, -4]} intensity={props.settings.night ? 1.5 : 1.7} color={props.settings.night ? '#9dd5cb' : '#e4e9ed'} />
       <Suspense fallback={null}>
         {environment}
-        <Robot settings={props.settings} action={props.action} plant={props.plant} onWave={props.onWave} onRendered={() => setLoaded(true)} />
+        <Robot settings={props.settings} action={props.action} plant={props.plant} onWave={props.onWave} onRendered={() => setLoaded(true)} mood={props.mood} gardenView={props.gardenView} />
+        <ProceduralHabitat zone={props.zone} garden={props.garden} gardenView={props.gardenView} night={props.settings.night} reducedMotion={props.settings.reducedMotion} selected={props.selectedPlot} onSelect={props.onSelectPlot} />
         {shadow}
         <FramePump reducedMotion={props.settings.reducedMotion} activity={props.action} software={software} />
       </Suspense>

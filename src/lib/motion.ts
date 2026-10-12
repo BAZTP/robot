@@ -1,4 +1,14 @@
-export type RobotAction = 'idle' | 'wave' | 'explore' | 'dance' | 'charge' | 'water';
+export type RobotAction = 'idle' | 'wave' | 'explore' | 'dance' | 'charge' | 'water' | 'rest';
+export type RobotMood = 'curious' | 'happy' | 'tired' | 'sleeping';
+
+export function eyeOpenness(time: number, mood: RobotMood, reducedMotion = false) {
+  if (mood === 'sleeping') return 0.08;
+  const baseline = mood === 'tired' ? 0.5 : mood === 'happy' ? 0.8 : 1;
+  if (reducedMotion) return baseline;
+  const phase = ((time % 6) + 6) % 6;
+  const blink = phase > 5.65 ? Math.sin((phase - 5.65) / 0.35 * Math.PI) : 0;
+  return Math.max(0.06, baseline * (1 - blink));
+}
 
 // Every pose is computed from time. No animation clips or downloaded models.
 export function robotPose(time: number, action: RobotAction, reducedMotion = false) {
@@ -6,8 +16,8 @@ export function robotPose(time: number, action: RobotAction, reducedMotion = fal
   const dance = action === 'dance';
   const exploring = action === 'explore';
   return {
-    headTilt: Math.sin(t * (dance ? 4 : 0.7)) * (dance ? 0.2 : 0.045),
-    headTurn: Math.sin(t * 0.45) * 0.13,
+    headTilt: action === 'rest' ? 0.10 : Math.sin(t * (dance ? 4 : 0.7)) * (dance ? 0.2 : 0.045),
+    headTurn: action === 'rest' ? 0 : Math.sin(t * 0.45) * 0.13,
     bodyY: Math.sin(t * (dance ? 6 : 1.6)) * (dance ? 0.055 : 0.012),
     bodyTilt: dance ? Math.sin(t * 4) * 0.09 : 0,
     leftArm: action === 'wave' ? -0.9 + Math.sin(t * 7) * 0.24 : dance ? Math.sin(t * 4) * 0.45 : 0.08,
